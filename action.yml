@@ -43,7 +43,32 @@ runs:
       shell: bash
       run: |
           npm install --prefer-offline --no-audit
-          npm test
+
+          # Cypress 16 deprecates Electron, its default browser. The runner
+          # image's `chrome` is Playwright's Chromium, a Chrome for Testing
+          # build, which Cypress detects as `chrome-for-testing` from 13.17.0
+          # on. WOPEE_CYPRESS_BROWSER picks another browser (`electron` keeps
+          # the old one); the default is only used where it can run, and never
+          # over a browser the project's own test script already picks.
+          BROWSER="${WOPEE_CYPRESS_BROWSER:-}"
+          if [ -z "$BROWSER" ]; then
+            CYPRESS_VERSION=$(node -p "require('cypress/package.json').version" 2>/dev/null || true)
+            if node -p "require('./package.json').scripts?.test ?? ''" 2>/dev/null | grep -q -- "--browser"; then
+              echo "The test script picks its own browser."
+            elif ! node -e 'const [major, minor] = process.argv[1].split(".").map(Number); process.exit(major > 13 || (major === 13 && minor >= 17) ? 0 : 1)' "$CYPRESS_VERSION"; then
+              echo "::warning::Cypress ${CYPRESS_VERSION:-not found} cannot run Chrome for Testing (needs 13.17.0 or newer), running in Electron."
+            elif ! chrome --version 2>/dev/null | grep -q "Google Chrome for Testing"; then
+              echo "::warning::No Chrome for Testing on this runner, running in Electron."
+            else
+              BROWSER=chrome-for-testing
+            fi
+          fi
+
+          if [ -n "$BROWSER" ]; then
+            npm test -- --browser "$BROWSER"
+          else
+            npm test
+          fi
 
     - name: Confirm end of run
       if: always()
